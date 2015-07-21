@@ -1,0 +1,7 @@
+bin
+obj
+*.user
+*.suo
+Properties/PublishProfiles
+Web.config
+Web.*.config
