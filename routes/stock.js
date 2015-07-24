@@ -37,6 +37,7 @@ router.get('/data/:mod?/:id?/:meta?', function(req, res, next) {
 	}
 	
 	//query += " GROUP BY `Mod`, Id, Meta";
+	query += " ORDER BY `Mod`, Id, Meta, `Date`";
 	
 	db.getConnection(function(err, cn) {
 		if(err) {
@@ -44,14 +45,45 @@ router.get('/data/:mod?/:id?/:meta?', function(req, res, next) {
 			return;
 		}
 		
-		cn.query(query, params, function(err, rows) {
-			if(err) {
-				next(err);
-				return;
+		var ret = {};
+		var m = null, i = null, e = null;
+		
+		var q = cn.query(query, params)
+			
+		q.on('error', function(err) {
+			next(err);
+			q.off('end');
+		});
+		
+		q.on('result', function(r) {
+			if(r.Mod != m) {
+				m = r.Mod;
+				ret[m] = {};
+				i = null;
+				e = null;
 			}
 			
-			res.send(rows);
+			if(r.Id != i) {
+				i = r.Id;
+				ret[m][i] = {};
+				e = null;
+			}
+			
+			if(r.Meta != e) {
+				e = r.Meta;
+				ret[m][i][e] = [];
+			}
+			
+			ret[m][i][e].push({
+				date: r.Date.getTime(),
+				qty: r.Qty
+			});
 		});
+		
+		q.on('end', function() {
+			res.send(ret);
+		});
+		
 	});
 });
 
