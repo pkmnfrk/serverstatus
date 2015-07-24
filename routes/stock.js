@@ -3,138 +3,20 @@ var db = require("../db");
 var express = require('express');
 var router = express.Router();
 var bodyParser = require('body-parser');
+var apiKey = require('../apikey');
 
-var apiCache = {};
+router.use(apiKey);
 
-function failAuth(res) {
-	res.set("WWW-Authenticate", "ApiKey");
-	res.sendStatus(401);
-}
-
-router.use(function(req, res, next) {
-	var auth = req.get('Authorization');
-	
-	if(auth) {
-		
-		auth = /^ApiKey (.*)$/i.exec(auth);
-		
-		if(auth) {
-			auth = auth[1];
-			
-			if(auth) {
-				auth = auth.toLowerCase();
-				
-				if(apiCache[auth]) {
-					var c = apiCache[auth];
-					if(c.revalidate < new Date()) {
-						req.serverId = c.serverId;
-						next();
-						return;
-					}
-				}
-				
-				db.getConnection(function(err, cn) {
-					cn.query("SELECT * FROM ApiKey WHERE `Key` = ?", [auth], function(err, rows) {
-						db.returnConnection(cn);
-						if(rows.length) {
-							//console.log(rows[0]);
-							var rev = new Date();
-							rev.setMinutes(rev.getMinutes() + 15);
-							
-							apiCache[auth] = {
-								revalidate: rev,
-								serverId: rows[0].ServerId
-							};
-							
-							req.serverId = rows[0].ServerId;
-							next();
-						} else {
-							failAuth(res);
-						}
-					});
-				});
-				
-			}
-			return;
-			
-		}
-	}
-	
-	failAuth(res);
-});
-
-router.get('/', function(req, res, next) {
-	db.getConnection(function(err, cn) {
-		if(err) {
-			next(err);
-			return;
-		}
-		
-		cn.query("SELECT `Mod`, Id, Meta, Qty FROM StockItem", function(err, rows) {
-			if(err) {
-				next(err);
-				return;
-			}
-			
-			db.returnConnection(cn);
-			
-			res.send(rows);
-			
-		});
-	});
-});
-
-router.get('/:mod', function(req, res, next) {
-	var mod = req.params.mod;
-	
-	db.getConnection(function(err, cn) {
-		if(err) {
-			next(err);
-			return;
-		}
-		
-		cn.query("SELECT `Mod`, Id, Meta, Qty FROM StockItem Where `Mod` = ?", [mod], function(err, rows) {
-			if(err) {
-				next(err);
-				return;
-			}
-			
-			db.returnConnection(cn);
-			
-			res.send(rows);
-			
-		});
-	});
-});
-
-router.get('/:mod/:id', function(req, res, next) {
-	var mod = req.params.mod;
-	var id = req.params.id;
-	
-	db.getConnection(function(err, cn) {
-		if(err) {
-			next(err);
-			return;
-		}
-		
-		cn.query("SELECT `Mod`, Id, Meta, Qty FROM StockItem Where `Mod` = ? AND Id = ?", [mod, id], function(err, rows) {
-			if(err) {
-				next(err);
-				return;
-			}
-			
-			db.returnConnection(cn);
-			
-			res.send(rows);
-			
-		});
-	});
-});
-
-router.get('/:mod/:id/:meta', function(req, res, next) {
+router.get('/:mod?/:id?/:meta?', function(req, res, next) {
 	var mod = req.params.mod;
 	var id = req.params.id;
 	var meta = req.params.meta;
+	var serverId = req.serverId || req.query.serverid;
+	
+	if(!serverId) {
+		next(new Error("No serverid"));
+		return;
+	}
 	
 	db.getConnection(function(err, cn) {
 		if(err) {
@@ -142,7 +24,26 @@ router.get('/:mod/:id/:meta', function(req, res, next) {
 			return;
 		}
 		
-		cn.query("SELECT `Mod`, Id, Meta, Qty FROM StockItem Where `Mod` = ? AND Id = ? And Meta = ?", [mod, id, meta], function(err, rows) {
+		var query = "SELECT `Mod`, Id, Meta, Qty FROM StockItem Where";
+		var params = [];
+		
+		query += " ServerId = ?";
+		params.push(serverId);
+		
+		if(mod) {
+			query += " AND `Mod` = ?";
+			params.push(mod);
+			if(id) {
+				query += " AND Id = ?";
+				params.push(id);
+				if(meta) {
+					query += " AND Meta = ?";
+					params.push(meta);
+				}
+			}
+		}
+		
+		cn.query(query, params, function(err, rows) {
 			if(err) {
 				next(err);
 				return;
@@ -158,7 +59,7 @@ router.get('/:mod/:id/:meta', function(req, res, next) {
 
 var jsonBody = bodyParser.json();
 
-router.post('/:mod/:id/:meta?', jsonBody ,function(req, res, next) {
+router.post('/:mod/:id/:meta?', apiKey.demand, jsonBody, function(req, res, next) {
 	var mod = req.params.mod;
 	var id = req.params.id;
 	var meta = req.params.meta;
